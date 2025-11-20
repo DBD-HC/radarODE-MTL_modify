@@ -2,10 +2,6 @@ import torch,sys,os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 import torch.nn as nn
-import torch.nn.functional as F
-import math
-from deformable_attention import DeformableAttention1D
-from einops import rearrange
 
 from torchinfo import summary
 
