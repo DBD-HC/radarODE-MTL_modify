@@ -133,7 +133,7 @@ if __name__ == "__main__":
     T_max = 100
 
     params = parse_args(LibMTL_args)
-    params.gpu_id = '6'
+    params.gpu_id = '0'
 
     params.dataset_path = '/home/zhangyuanyuan/Dataset/data_MMECG/data_seg_step/'
     params.save_path = '/root/autodl-tmp/radarode/Projects/radarODE_plus/checkpoint/'

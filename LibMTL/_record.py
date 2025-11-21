@@ -79,13 +79,13 @@ class _PerformanceMeter(object):
             p_mode = 'TEST'
         print('{}: '.format(p_mode), end='')
         for tn, task in enumerate(self.task_name):
-            print('{:.4f} '.format(self.loss_item[tn]), end='')
+            print('[task-{}] loss: {:.4f} results: '.format(task, self.loss_item[tn]), end='')
             for i in range(len(self.results[task])):
                 print('{:.4f} '.format(self.results[task][i]), end='')
             print('| ', end='')
         print('Time: {:.4f}'.format(self.end_time-self.beg_time), end='')
         print(' | ', end='') if mode!='test' else print()
-        print(' | ') if mode=='train' else print()
+        print(' | ') if mode == 'train' else print()
         
     def display_best_result(self):
         print('='*40)

@@ -22,6 +22,22 @@ class MMECGDataset(BaseDataset):
     def __len__(self):
         return len(self.filenames)
 
+    @staticmethod
+    def preprocessing_radar(radar):
+        radar_max = np.max(radar, keepdims=True)
+        radar_min = np.min(radar, keepdims=True)
+        radar = (radar - radar_min) / (radar_max - radar_min + 1e-7)
+        return radar
+
+    @staticmethod
+    def preprocessing_ref(ref):
+        return ref[:, 0]
+
+    @staticmethod
+    def preprocessing_anchor(anchor):
+        anchor = np.transpose(anchor, (1, 0))
+        return anchor
+
     def __getitem__(self, index):
         sst_filename, ecg_filename, anchor_filename, es, et, ss, st = self.get_inf(index)
         d = np.load(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))[:, :, ss:st]

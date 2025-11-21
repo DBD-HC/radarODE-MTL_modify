@@ -181,21 +181,6 @@ class BaseDataset(Dataset):
         anchor_filename = sample2file['anchor_fn']
         return sst_filename, ecg_filename, anchor_filename, es, et, ss, st
 
-    @staticmethod
-    def preprocessing_radar(radar):
-        radar_max = np.max(radar, keepdims=True)
-        radar_min = np.min(radar, keepdims=True)
-        radar = (radar - radar_min) / (radar_max - radar_min + 1e-7)
-        return radar
-
-    @staticmethod
-    def preprocessing_ref(ref):
-        return ref[:, 0]
-
-    @staticmethod
-    def preprocessing_anchor(anchor):
-        return anchor
-
     def __getitem__(self, index):
         pass
 

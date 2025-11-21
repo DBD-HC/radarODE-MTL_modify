@@ -18,8 +18,8 @@ class EGA(AbsWeighting):
     def backward(self, losses, **kwargs):
         T = kwargs['EGA_temp']
         warmup_epoch = 4
-        batch_weight = np.ones(len(losses))
-
+        # batch_weight = np.ones(len(losses))
+        batch_weight = torch.ones(len(losses), device=self.device)
         grads = self._get_grads(losses, mode='backward')
         if self.rep_grad:
             per_grads, grads = grads[0], grads[1]
@@ -50,9 +50,10 @@ class EGA(AbsWeighting):
             w_i = (torch.Tensor(self.train_loss_buffer[:,self.epoch-1]).to(self.device)/self.nadir_vector)
             batch_weight = self.task_num*F.softmax(w_i/T, dim=-1) # eccentric vector
             # print(batch_weight)
-
-        alpha = (B.sum(0).to(self.device))*(torch.Tensor(batch_weight).to(self.device))
-
+        try:
+            alpha = B.sum(0)*batch_weight
+        except BaseException as e:
+            print(e)
         if self.rep_grad:
             self._backward_new_grads(alpha, per_grads=per_grads)
         else:
