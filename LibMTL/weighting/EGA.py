@@ -51,7 +51,7 @@ class EGA(AbsWeighting):
             batch_weight = self.task_num*F.softmax(w_i/T, dim=-1) # eccentric vector
             # print(batch_weight)
 
-        alpha = B.sum(0)*torch.Tensor(batch_weight).to(self.device)
+        alpha = (B.sum(0).to(self.device))*(torch.Tensor(batch_weight).to(self.device))
 
         if self.rep_grad:
             self._backward_new_grads(alpha, per_grads=per_grads)

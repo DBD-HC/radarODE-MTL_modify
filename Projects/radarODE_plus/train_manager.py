@@ -136,7 +136,7 @@ if __name__ == "__main__":
     params.gpu_id = '6'
 
     params.dataset_path = '/home/zhangyuanyuan/Dataset/data_MMECG/data_seg_step/'
-    params.save_path = '/home/zhangyuanyuan/radarODE_plus_MTL/Model_saved/'
+    params.save_path = '/root/autodl-tmp/radarode/Projects/radarODE_plus/checkpoint/'
 
     # set device
     set_device(params.gpu_id)
