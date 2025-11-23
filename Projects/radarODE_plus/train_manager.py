@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 # for vscode
 import visdom
+from tqdm import tqdm
 
 from Projects.radarODE_plus.mmecg_dataset import MMECGDataSpliter
 from Projects.radarODE_plus.utils.utils import shapeMetric, shapeLoss, ppiMetric, ppiLoss, anchorMetric, anchorLoss
@@ -52,13 +53,120 @@ def cross_domain(params, domain, train_index, test_index, data_spliter, normaliz
     train_loader = get_dataloader(train_dataset, shuffle=True, collate_fn=None, batch_size=params.train_bs)
     val_loader = get_dataloader(val_dataset, shuffle=False, collate_fn=None, batch_size=params.test_bs)
     test_loader = get_dataloader(test_dataset, shuffle=False, collate_fn=None, batch_size=params.test_bs)
+
     params.mode = 'train'
     main(params, train_loader, val_loader, test_loader)
     params.mode = 'test'
     main(params, None, None, test_loader)
 
+    long_term_pcc = []
+    for idx in test_index:
+        params.mode = 'long_term_val'
+        radar_trails, ref_trails = data_spliter.get_trails(domain, idx)
+        radar_trails = torch.from_numpy(radar_trails).type(torch.float32).cuda()
+        ref_trails = torch.from_numpy(ref_trails).type(torch.float32).cuda()
+        recon_ecg = main(params, None, None, None, radar_trails)
+        pcc, _ = batch_max_pearson_corr(ref_trails[:, :, :recon_ecg.size(-1)], recon_ecg, dim=-1, max_lag=100)
+        pcc = torch.mean(pcc, dim=0)
+        long_term_pcc.append(pcc)
+        print(f'[validation] long term pcc {long_term_pcc}')
+        model_name = 'RadarODE'
 
-def main(params, train_loader, val_loader, test_loader):
+        recon_ecg = normalize_fn(recon_ecg)
+        ref_data = normalize_fn(ref_trails)
+        visualize_gen_curves(recon_ecg[0, 0], ref_data[0, 0, :len(recon_ecg[0, 0])], viz,
+                             win=f'gen_ecg_lt_{domain}_{idx}_{model_name}',
+                             title=f'gen_ecg_lt_{domain}_{idx}_{model_name}')
+
+
+def batch_max_pearson_corr(x: torch.Tensor, y: torch.Tensor, dim=-1, max_lag: int = None, eps: float = 1e-8):
+    """
+    批量计算每条时间序列的最大皮尔逊相关系数及对应 lag。
+
+    参数：
+        x, y      : [batch, T] Tensor
+        max_lag   : int, 最大考虑的正负时延
+        eps       : float, 防止除零
+
+    返回：
+        max_pcc   : [batch] Tensor, 每条序列的最大 PCC
+        best_lag  : [batch] Tensor, 每条序列对应 lag
+    """
+    if x.shape != y.shape:
+        raise ValueError("x 和 y 必须形状相同")
+    batch_size, C, T = x.shape
+    if max_lag is None:
+        max_lag = T - 1
+
+    max_pcc = torch.full((batch_size,), -2.0, device=x.device, dtype=x.dtype)
+    best_lag = torch.zeros((batch_size,), device=x.device, dtype=torch.int)
+
+    for lag in range(-max_lag, max_lag + 1):
+        if lag < 0:
+            xs = x[..., :T + lag]
+            ys = y[..., -lag:]
+        elif lag > 0:
+            xs = x[..., lag:]
+            ys = y[..., :T - lag]
+        else:
+            xs, ys = x, y
+
+        xm = xs - xs.mean(dim=dim, keepdim=True)
+        ym = ys - ys.mean(dim=dim, keepdim=True)
+
+        r_num = torch.sum(xm * ym, dim=dim, keepdim=True)
+        r_den = torch.sqrt(torch.sum(xm ** 2, dim=dim, keepdim=True) * torch.sum(ym ** 2, dim=dim, keepdim=True)) + eps
+        pcc = r_num / r_den
+
+        mask = pcc[:, 0, 0] > max_pcc
+        max_pcc = torch.where(mask, pcc[:, 0, 0], max_pcc)
+        best_lag = torch.where(mask, torch.full_like(best_lag, lag), best_lag)
+
+    return max_pcc, best_lag
+
+
+def visualize_gen_curves(gen_curves, ref_curves, viz, win='curves', title='Generated vs Reference'):
+    """
+    使用 visdom 可视化生成曲线和参考曲线
+
+    参数:
+        gen_curves : numpy.ndarray 或 torch.Tensor, shape [N] 或 [batch, N]
+        ref_curves : numpy.ndarray 或 torch.Tensor, 同 shape
+        viz        : visdom.Visdom 实例
+        win        : str, 窗口名字
+        title      : str, 窗口标题
+    """
+    if viz is None:
+        return
+
+    # 转 numpy
+    if hasattr(gen_curves, "detach"):
+        gen_curves = gen_curves.detach().cpu().numpy()
+    if hasattr(ref_curves, "detach"):
+        ref_curves = ref_curves.detach().cpu().numpy()
+
+    # 如果是 batch，取第一条或平均
+    if gen_curves.ndim > 1:
+        gen_curves = gen_curves.mean(axis=0)
+    if ref_curves.ndim > 1:
+        ref_curves = ref_curves.mean(axis=0)
+
+    x = np.arange(len(gen_curves))
+
+    viz.line(
+        X=np.column_stack([x, x]),
+        Y=np.column_stack([gen_curves, ref_curves]),
+        win=win,
+        opts=dict(
+            title=title,
+            xlabel='Time step',
+            ylabel='Value',
+            legend=['Generated', 'Reference']
+        )
+    )
+
+
+def main(params, train_loader, val_loader, test_loader, trails=None):
     kwargs, optim_param, scheduler_param = prepare_args(params)
     # define tasks
     task_dict = {'ECG_shape': {'metrics': ['norm_MSE', 'MSE', 'CE'],
@@ -116,14 +224,17 @@ def main(params, train_loader, val_loader, test_loader):
         radarODE_plus_model.train(train_loader, val_loader, params.epochs)
     elif params.mode == 'test':
         radarODE_plus_model.test(test_loader)
+    elif params.mode == 'long_term_val':
+        gen_ecg = radarODE_plus_model.long_term_validation(trails)
+        return gen_ecg
     else:
         raise ValueError
 
 
 if __name__ == "__main__":
     print(f'cuda is available {torch.cuda.is_available()}')
-    n_epochs = 200
-    batch_size = 22
+    n_epochs = 50
+    batch_size = 32
     learning_rate = 5e-3
     lr_scheduler = 'cos'
     optimizer = 'sgd'
