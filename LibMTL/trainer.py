@@ -9,6 +9,7 @@ import LibMTL.weighting as weighting_method
 import LibMTL.architecture as architecture_method
 from tqdm import tqdm
 
+
 class Trainer(nn.Module):
     r'''A Multi-Task Learning Trainer.
 
@@ -76,11 +77,12 @@ class Trainer(nn.Module):
                           **kwargs)
 
     '''
-    def __init__(self, task_dict, weighting, architecture, encoder_class, decoders, 
-                 rep_grad, multi_input, optim_param, scheduler_param, 
+
+    def __init__(self, task_dict, weighting, architecture, encoder_class, decoders,
+                 rep_grad, multi_input, optim_param, scheduler_param,
                  save_path=None, load_path=None, modelName='best', **kwargs):
         super(Trainer, self).__init__()
-        
+
         self.device = torch.device('cuda:0')
         self.kwargs = kwargs
         self.task_dict = task_dict
@@ -95,23 +97,24 @@ class Trainer(nn.Module):
 
         self._prepare_model(weighting, architecture, encoder_class, decoders)
         self._prepare_optimizer(optim_param, scheduler_param)
-        
+
         self.meter = _PerformanceMeter(self.task_dict, self.multi_input)
-        
+
     def _prepare_model(self, weighting, architecture, encoder_class, decoders):
 
-        weighting = weighting_method.__dict__[weighting] 
+        weighting = weighting_method.__dict__[weighting]
         architecture = architecture_method.__dict__[architecture]
-        
+
         class MTLmodel(architecture, weighting):
             def __init__(self, task_name, encoder_class, decoders, rep_grad, multi_input, device, kwargs):
-                super(MTLmodel, self).__init__(task_name, encoder_class, decoders, rep_grad, multi_input, device, **kwargs)
+                super(MTLmodel, self).__init__(task_name, encoder_class, decoders, rep_grad, multi_input, device,
+                                               **kwargs)
                 self.init_param()
-                
-        self.model = MTLmodel(task_name=self.task_name, 
-                              encoder_class=encoder_class, 
-                              decoders=decoders, 
-                              rep_grad=self.rep_grad, 
+
+        self.model = MTLmodel(task_name=self.task_name,
+                              encoder_class=encoder_class,
+                              decoders=decoders,
+                              rep_grad=self.rep_grad,
                               multi_input=self.multi_input,
                               device=self.device,
                               kwargs=self.kwargs['arch_args']).to(self.device)
@@ -121,20 +124,20 @@ class Trainer(nn.Module):
             self.model.load_state_dict(torch.load(self.load_path), strict=False)
             print('Load Model from - {}'.format(self.load_path))
         count_parameters(self.model)
-        
+
     def _prepare_optimizer(self, optim_param, scheduler_param):
         optim_dict = {
-                'sgd': torch.optim.SGD,
-                'adam': torch.optim.Adam,
-                'adagrad': torch.optim.Adagrad,
-                'rmsprop': torch.optim.RMSprop,
-            }
+            'sgd': torch.optim.SGD,
+            'adam': torch.optim.Adam,
+            'adagrad': torch.optim.Adagrad,
+            'rmsprop': torch.optim.RMSprop,
+        }
         scheduler_dict = {
-                'exp': torch.optim.lr_scheduler.ExponentialLR,
-                'step': torch.optim.lr_scheduler.StepLR,
-                'cos': torch.optim.lr_scheduler.CosineAnnealingLR,
-                'reduce': torch.optim.lr_scheduler.ReduceLROnPlateau,
-            }
+            'exp': torch.optim.lr_scheduler.ExponentialLR,
+            'step': torch.optim.lr_scheduler.StepLR,
+            'cos': torch.optim.lr_scheduler.CosineAnnealingLR,
+            'reduce': torch.optim.lr_scheduler.ReduceLROnPlateau,
+        }
         optim_arg = {k: v for k, v in optim_param.items() if k != 'optim'}
         self.optimizer = optim_dict[optim_param['optim']](self.model.parameters(), **optim_arg)
         if scheduler_param is not None:
@@ -156,7 +159,7 @@ class Trainer(nn.Module):
         else:
             label = label.to(self.device, non_blocking=True)
         return data, label
-    
+
     def process_preds(self, preds, task_name=None):
         r'''The processing of prediction for each task. 
 
@@ -178,7 +181,7 @@ class Trainer(nn.Module):
         else:
             train_losses = self.meter.losses[task_name]._update_loss(preds, gts)
         return train_losses
-        
+
     def _prepare_dataloaders(self, dataloaders):
         if not self.multi_input:
             loader = [dataloaders, iter(dataloaders)]
@@ -191,7 +194,7 @@ class Trainer(nn.Module):
                 batch_num.append(len(dataloaders[task]))
             return loader, batch_num
 
-    def train(self, train_dataloaders, test_dataloaders, epochs, 
+    def train(self, train_dataloaders, test_dataloaders, epochs,
               val_dataloaders=None, return_weight=False):
         r'''The training process of multi-task learning.
 
@@ -209,7 +212,7 @@ class Trainer(nn.Module):
         print(os.path.join(self.save_path, f'best_{self.modelName}.pt'))
         train_loader, train_batch = self._prepare_dataloaders(train_dataloaders)
         train_batch = max(train_batch) if self.multi_input else train_batch
-        
+
         self.batch_weight = np.zeros([self.task_num, epochs, train_batch])
         self.model.train_loss_buffer = np.zeros([self.task_num, epochs])
         self.model.test_loss_buffer = np.zeros([self.task_num, epochs])
@@ -220,7 +223,7 @@ class Trainer(nn.Module):
             # print('Epoch:', epoch)
             self.model.train()
             self.meter.record_time('begin')
-            for batch_index in tqdm(range(train_batch)):
+            for batch_index in range(train_batch):
                 if not self.multi_input:
                     train_inputs, train_gts = self._process_data(train_loader)
                     train_preds = self.model(train_inputs)
@@ -236,14 +239,14 @@ class Trainer(nn.Module):
                         train_pred = self.process_preds(train_pred, task)
                         train_losses[tn] = self._compute_loss(train_pred, train_gt, task)
                         self.meter.update(train_pred, train_gt, task)
-                        
+
                 self.optimizer.zero_grad(set_to_none=False)
                 w = self.model.backward(train_losses, **self.kwargs['weight_args'])
                 if w is not None:
                     self.batch_weight[:, epoch, batch_index] = w
                 self.optimizer.step()
-            
-            print(w,'\t')
+
+            print(w, '\t')
             self.meter.record_time('end')
             self.meter.get_score()
             # for tn, task in enumerate(self.task_name):
@@ -253,11 +256,11 @@ class Trainer(nn.Module):
             np.save(os.path.join(self.save_path, f'best_{self.modelName}_train.npy'), self.model.train_loss_buffer)
             self.meter.display(epoch=epoch, mode='train')
             self.meter.reinit()
-            
+
             if val_dataloaders is not None:
                 self.meter.has_val = True
                 val_improvement = self.test(val_dataloaders, epoch, mode='val', return_improvement=True)
-            self.test(test_dataloaders, self.model.test_loss_buffer, epoch = epoch, mode='test')
+            self.test(test_dataloaders, self.model.test_loss_buffer, epoch=epoch, mode='test')
             if self.scheduler is not None:
                 if self.scheduler_param['scheduler'] == 'reduce' and val_dataloaders is not None:
                     self.scheduler.step(val_improvement)
@@ -265,7 +268,8 @@ class Trainer(nn.Module):
                     self.scheduler.step()
             if self.save_path is not None and self.meter.best_result['epoch'] == epoch:
                 torch.save(self.model.state_dict(), os.path.join(self.save_path, f'best_{self.modelName}.pt'))
-                print('\033[31mBest Model\033[0m {} to {}'.format(epoch, os.path.join(self.save_path, f'best_{self.modelName}.pt')))
+                print('\033[31mBest Model\033[0m {} to {}'.format(epoch, os.path.join(self.save_path,
+                                                                                      f'best_{self.modelName}.pt')))
                 # save the metrics
                 np.save(os.path.join(self.save_path, f'best_{self.modelName}_best_result.npy'), self.meter.best_result)
             else:
@@ -273,7 +277,6 @@ class Trainer(nn.Module):
         self.meter.display_best_result()
         if return_weight:
             return self.batch_weight
-
 
     def test(self, test_dataloaders, test_loss_buffer=None, epoch=None, mode='test', return_improvement=False):
         r'''The test process of multi-task learning.
@@ -285,12 +288,12 @@ class Trainer(nn.Module):
             epoch (int, default=None): The current epoch. 
         '''
         test_loader, test_batch = self._prepare_dataloaders(test_dataloaders)
-        
+
         self.model.eval()
         self.meter.record_time('begin')
         with torch.no_grad():
             if not self.multi_input:
-                for batch_index in tqdm(range(test_batch)):
+                for batch_index in range(test_batch):
                     test_inputs, test_gts = self._process_data(test_loader)
                     test_preds = self.model(test_inputs)
                     test_preds = self.process_preds(test_preds)
@@ -307,14 +310,34 @@ class Trainer(nn.Module):
                         self.meter.update(test_pred, test_gt, task)
         self.meter.record_time('end')
         self.meter.get_score()
-        test_loss_buffer[:, epoch] = self.meter.loss_item
-        np.save(os.path.join(self.save_path, f'best_{self.modelName}_test.npy'), test_loss_buffer)
+        if epoch is not None:
+            test_loss_buffer[:, epoch] = self.meter.loss_item
+            np.save(os.path.join(self.save_path, f'best_{self.modelName}_test.npy'), test_loss_buffer)
         self.meter.display(epoch=epoch, mode=mode)
         improvement = self.meter.improvement
         self.meter.reinit()
         if return_improvement:
             return improvement
-        
+
+    def long_term_validation(self, radar_data, win_size=120, drop_last=True):
+        self.model.load_state_dict(torch.load(os.path.join(self.save_path, f'best_{self.modelName}.pt')))
+        self.model.eval()
+        with torch.no_grad():
+            B, C, D, T = radar_data.shape
+            step = T // win_size
+            result = []
+            for i in tqdm(range(step)):
+                if drop_last and i == step - 1:
+                    break
+                s, t = i * win_size, (i + 1) * win_size
+                temp_radar = radar_data[:, :, :, s:t]
+                temp_preds = self.model(temp_radar)
+                pred_ecg_shapes = temp_preds[self.task_name[0]]
+                pred_ppi = temp_preds[self.task_name[1]]
+                pred_anchor = temp_preds[self.task_name[2]]
+                ecg = reconstruct_ecg_with_ppi_correction(pred_ecg_shapes, pred_ppi, pred_anchor)
+                result.append(ecg.detach())
+        return torch.cat(result, dim=-1)
 
     def test_visiual(self, test_dataloaders, epoch=None, mode='test'):
         r'''For visualization and evaluation of multi-task learning.
@@ -343,3 +366,54 @@ class Trainer(nn.Module):
         improvement = self.meter.improvement
         self.meter.reinit()
         return Inputs, Preds, Gts, Losses, improvement
+
+
+def normal_ecg_torch_01(ECG):
+    for itr in range(ECG.size(dim=0)):
+        ECG[itr] = (ECG[itr]-torch.min(ECG[itr])) / \
+            (torch.max(ECG[itr])-torch.min(ECG[itr]))
+    return ECG
+
+def reconstruct_ecg_with_ppi_correction(cycle_ecg, cycle_length_prob, r_peak, r_peak_thr=0.8):
+    B, C, T = cycle_ecg.shape
+    device = cycle_ecg.device
+    full_len = r_peak.size(-1)
+    r_peak = normal_ecg_torch_01(r_peak)
+
+    # 周期长度预测（基准周期）
+    cycle_len_pred = torch.argmax(cycle_length_prob, dim=-1).squeeze(1)  # B
+
+    full_ecg = torch.zeros(B, 1, full_len, device=device)
+
+    for b in range(B):
+        single_cycle = cycle_ecg[b:b + 1]  # 1x1x200
+        base_len = cycle_len_pred[b].item()
+
+        # 1) 获取 R 波序列
+        r_binary = (r_peak[b, 0] > r_peak_thr).float()
+        r_idx = (r_binary == 1).nonzero(as_tuple=True)[0].tolist()
+        if len(r_idx) == 0:
+            repeated = F.interpolate(single_cycle, size=full_len, mode='linear', align_corners=True)
+            full_ecg[b] = repeated
+        else:
+            s_idx, e_idx = r_idx[0], r_idx[-1]
+            s_part = F.interpolate(single_cycle[:, :, -int((s_idx / base_len) * T):], size=s_idx, mode='linear',
+                                   align_corners=True)
+            full_ecg[b, :, :s_idx] = s_part
+            e_part = F.interpolate(single_cycle[:, :, :int(((full_len - e_idx) / base_len) * T)], size=full_len - e_idx,
+                                   mode='linear', align_corners=True)
+            full_ecg[b, :, e_idx:] = e_part
+            for i in range(len(r_idx) - 1):
+                r1 = r_idx[i]
+                r2 = r_idx[i + 1]
+                ppi = r2 - r1
+                template_ecg = single_cycle
+                # ---- PPI 异常纠正逻辑 ----
+                if ppi > 1.8 * base_len:
+                    # R 波漏检 => 用预测周期替换
+                    num_cycle = int(round(ppi / base_len))
+                    template_ecg = torch.cat([template_ecg for _ in range(num_cycle)], dim=-1)
+                ecg_rescaled = F.interpolate(template_ecg, size=ppi, mode='linear', align_corners=True)
+                full_ecg[b, :, r1:r2] = ecg_rescaled
+
+    return full_ecg

@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torch
 from tqdm import tqdm
+import visdom
 
 from Projects.radarODE_plus.spectrum_dataset import DataSpliter, BaseDataset, down_sample, add_gaussian_sst, \
     add_abrupt_sst, load_mat_auto
@@ -14,7 +15,7 @@ FILE_KEY_FORMAT = 'u{user}_st{status}'
 RADAR_TRAIL_FORMAT = 'radar_u{user}_st{status}_id{id}.npy'
 REF_TRAIL_FORMAT = 'ecg_u{user}_st{status}_id{id}.npy'
 POS_TRAIL_FORMAT = 'pos_u{user}_st{status}_id{id}.npy'
-
+RADAR_TRAIL_FORMAT = 'radar_u{user}_st{status}_id{id}.npy'
 
 class MMECGDataset(BaseDataset):
     def __init__(self, sst_ecg_root, filenames, sample2ecg_info, aug_snr=100, align_length=200):
@@ -40,6 +41,24 @@ class MMECGDataset(BaseDataset):
         anchor = np.transpose(anchor, (1, 0))
         return anchor
 
+    @staticmethod
+    def find_median_ppi_segment_start(signal):
+        r_locs = np.where(signal == 1)[0]
+        # 1. 找出所有 R 波位置
+        if len(r_locs) < 2:
+            raise ValueError("R 峰数量不足以计算 PPI")
+
+        # 2. 计算所有 PPI
+        ppis = np.diff(r_locs)  # [r2-r1, r3-r2, ...]
+
+        # 3. 找到中位数 PPI
+        median_ppi = np.median(ppis)
+
+        # 4. 找到与中位数最接近的 PPI 的索引
+        idx = np.argmin(np.abs(ppis - median_ppi))
+
+        return r_locs[idx], r_locs[idx + 1]
+
     def __getitem__(self, index):
         sst_filename, ecg_filename, anchor_filename, es, et, ss, st = self.get_inf(index)
         sst = load_mat_auto(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))
@@ -50,12 +69,16 @@ class MMECGDataset(BaseDataset):
         anchor = np.zeros_like(ref)
         anchor[anchor_mask] = 1
         anchor = anchor[es: et]
-        ref = ref[es:et]
+        ecg_s, ecg_t = self.find_median_ppi_segment_start(anchor[:, 0])
+        ref = ref[es:et][ecg_s:ecg_t]
         target_len = 260
         sst, ref, anchor = self.preprocessing_radar(sst), self.preprocessing_ref(ref), self.preprocessing_anchor(anchor)
         ecg_origin = down_sample(ref, target_len=None)
         ppi_info = np.pad(ecg_origin, (0, target_len - ecg_origin.shape[-1]), 'constant', constant_values=-10)
+        d, ref, anchor = self.preprocessing_radar(d), self.preprocessing_ref(ref), self.preprocessing_anchor(anchor)
+        # self.viz.heatmap(X=d[0], win='1')
 
+        ppi_info = np.pad(ref, (0, target_len - ref.shape[-1]), 'constant', constant_values=-10)
         ecg_target = down_sample(ref, target_len=200)[None, :]
         if self.aug_snr < 100:
             sst = add_gaussian_sst(sst, self.aug_snr)
@@ -108,8 +131,7 @@ class MMECGDataSpliter(DataSpliter):
                     self.sample_fold[cur_domain_idx[domain]].extend(temp_filenames)
 
     def get_trails(self, domain, index):
-        filename_list = os.listdir(os.path.join(self.data_root, 'trails'))
-        num_files = len(filename_list) // 3
+        # filename_list = os.listdir(os.path.join(self.data_root, 'sst/30Hz_half_01'))
         cur_domain_idx = [0 for _ in range(self.num_domain)]
         radar_trails = []
         ref_trails = []
@@ -119,22 +141,20 @@ class MMECGDataSpliter(DataSpliter):
             for s_id, s in enumerate(STATUS):
                 cur_domain_idx[2] = s_id
                 if cur_domain_idx[domain] == index:
-                    trail_id = 0
-                    while trail_id < num_files:
-                        radar_filename = RADAR_TRAIL_FORMAT.format(user=u, status=s, id=trail_id)
-                        ref_filename = REF_TRAIL_FORMAT.format(user=u, status=s, id=trail_id)
-                        pos_filename = POS_TRAIL_FORMAT.format(user=u, status=s, id=trail_id)
-                        trail_id += 1
-                        if radar_filename not in filename_list:
-                            continue
-                        radar_trails.append(np.load(os.path.join(self.data_root, 'trails', radar_filename)))
-                        ref_trails.append(np.load(os.path.join(self.data_root, 'trails', ref_filename)))
-                        pos_trails.append(np.load(os.path.join(self.data_root, 'trails', pos_filename)))
-
-        radar_trails = np.transpose(np.array(radar_trails), (0, 2, 1))
+                    sample_key = FILE_KEY_FORMAT.format(user=u, status=s)
+                    if sample_key not in self.sample2file_info:
+                        continue
+                    info_list = self.sample2file_info[sample_key]
+                    trail_set = set()
+                    for info in info_list:
+                        sst_trial_filename = info['sst_fn']
+                        if sst_trial_filename not in trail_set:
+                            radar_trails.append(np.load(os.path.join(self.data_root, 'sst/30Hz_half_01', sst_trial_filename)))
+                            trail_set.add(sst_trial_filename)
+                            ref_trails.append(np.load(os.path.join(self.data_root, 'trails', info['ecg_fn'])))
+        radar_trails = np.array(radar_trails)
         ref_trails = np.transpose(np.array(ref_trails), (0, 2, 1))
-        pos_trails = np.array(pos_trails)
-        return radar_trails, ref_trails, pos_trails
+        return radar_trails, ref_trails
 
     def split_data(self, domain, train_idx=(0, 1), test_idx=(0, 1), need_val=True):
         data = super(MMECGDataSpliter, self).split_data(domain, train_idx, test_idx, need_val)
