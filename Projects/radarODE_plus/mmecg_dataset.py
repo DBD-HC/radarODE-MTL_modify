@@ -33,6 +33,9 @@ class MMECGDataset(BaseDataset):
 
     @staticmethod
     def preprocessing_ref(ref):
+        ref_max = np.max(ref, keepdims=True)
+        ref_min = np.min(ref, keepdims=True)
+        ref = (ref - ref_min) / (ref_max - ref_min + 1e-7)
         return ref[:, 0]
 
     @staticmethod

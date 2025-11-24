@@ -397,11 +397,15 @@ def reconstruct_ecg_with_ppi_correction(cycle_ecg, cycle_length_prob, r_peak, r_
             full_ecg[b] = repeated
         else:
             s_idx, e_idx = r_idx[0], r_idx[-1]
-            s_part = F.interpolate(single_cycle[:, :, -int((s_idx / base_len) * T):], size=s_idx, mode='linear',
-                                   align_corners=True)
-            full_ecg[b, :, :s_idx] = s_part
-            e_part = F.interpolate(single_cycle[:, :, :int(((full_len - e_idx) / base_len) * T)], size=full_len - e_idx,
-                                   mode='linear', align_corners=True)
+            if s_idx > 0:
+                s_part = F.interpolate(single_cycle[:, :, -int((s_idx / base_len) * T):], size=s_idx, mode='linear',
+                                       align_corners=True)
+                full_ecg[b, :, :s_idx] = s_part
+            if int(((full_len - e_idx) / base_len) * T) == 0:
+                e_part = F.interpolate(single_cycle[:, :, :1], size=full_len - e_idx, mode='linear', align_corners=True)
+            else:
+                e_part = F.interpolate(single_cycle[:, :, :int(((full_len - e_idx) / base_len) * T)], size=full_len - e_idx,
+                                       mode='linear', align_corners=True)
             full_ecg[b, :, e_idx:] = e_part
             for i in range(len(r_idx) - 1):
                 r1 = r_idx[i]
@@ -409,10 +413,10 @@ def reconstruct_ecg_with_ppi_correction(cycle_ecg, cycle_length_prob, r_peak, r_
                 ppi = r2 - r1
                 template_ecg = single_cycle
                 # ---- PPI 异常纠正逻辑 ----
-                if ppi > 1.8 * base_len:
+                # if ppi > 1.8 * base_len:
                     # R 波漏检 => 用预测周期替换
-                    num_cycle = int(round(ppi / base_len))
-                    template_ecg = torch.cat([template_ecg for _ in range(num_cycle)], dim=-1)
+                #    num_cycle = int(round(ppi / base_len))
+                #    template_ecg = torch.cat([template_ecg for _ in range(num_cycle)], dim=-1)
                 ecg_rescaled = F.interpolate(template_ecg, size=ppi, mode='linear', align_corners=True)
                 full_ecg[b, :, r1:r2] = ecg_rescaled
 

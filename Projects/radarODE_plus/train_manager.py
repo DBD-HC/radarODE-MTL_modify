@@ -234,7 +234,7 @@ def main(params, train_loader, val_loader, test_loader, trails=None):
 if __name__ == "__main__":
     print(f'cuda is available {torch.cuda.is_available()}')
     n_epochs = 50
-    batch_size = 32
+    batch_size = 22
     learning_rate = 5e-3
     lr_scheduler = 'cos'
     optimizer = 'sgd'
