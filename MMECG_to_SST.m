@@ -14,7 +14,7 @@ f_s=200;
 % plot_range=3030:5030;
 for ID=1:91
     fprintf(['---------obj ', int2str(ID), '---------\n']);
-    load(['data_org/',int2str(ID),'.mat']);
+    load(['I:/dataset/MMECG202211/finalPartialPublicData20221108/',int2str(ID),'.mat']);
     ecgSignal=data.ECG;
     RCG=data.RCG;
     SST=[];
@@ -40,7 +40,7 @@ for ID=1:91
 %         SST(id,:,:)= -1 +k*(temp-min(min(temp)));  %Normalization[-1,1]
     end
 
-    save(['./data_sst/', int2str(f_d), 'Hz_half_01/SST_obj',int2str(data.id),'_',data.physistatus,'_',int2str(ID),'_', int2str(f_d), 'Hz.mat'],'SST','-v7.3')
+    save(['I:/dataset/MMECG202211/sst/30Hz_half_01/', 'SST_',int2str(ID),'.mat'],'SST','-v7.3')
 end
 
 close all

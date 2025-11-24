@@ -2,9 +2,10 @@ import os
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from Projects.radarODE_plus.spectrum_dataset import DataSpliter, BaseDataset, down_sample, add_gaussian_sst, \
-    add_abrupt_sst
+    add_abrupt_sst, load_mat_auto
 
 USER = [i + 1 for i in range(11)]
 STATUS = [i + 1 for i in range(4)]
@@ -27,6 +28,7 @@ class MMECGDataset(BaseDataset):
         radar_max = np.max(radar, keepdims=True)
         radar_min = np.min(radar, keepdims=True)
         radar = (radar - radar_min) / (radar_max - radar_min + 1e-7)
+        radar = np.transpose(radar, (2, 1, 0))
         return radar
 
     @staticmethod
@@ -40,7 +42,9 @@ class MMECGDataset(BaseDataset):
 
     def __getitem__(self, index):
         sst_filename, ecg_filename, anchor_filename, es, et, ss, st = self.get_inf(index)
-        d = np.load(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))[:, :, ss:st]
+        sst = load_mat_auto(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))
+        sst = sst['SST'][ss:st, :, :]
+        # d = np.load(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))[:, :, ss:st]
         ref = np.load(os.path.join(self.sst_ecg_root, 'trails', ecg_filename))
         anchor_mask = np.load(os.path.join(self.sst_ecg_root, 'anchor', anchor_filename))
         anchor = np.zeros_like(ref)
@@ -48,19 +52,19 @@ class MMECGDataset(BaseDataset):
         anchor = anchor[es: et]
         ref = ref[es:et]
         target_len = 260
-        d, ref, anchor = self.preprocessing_radar(d), self.preprocessing_ref(ref), self.preprocessing_anchor(anchor)
+        sst, ref, anchor = self.preprocessing_radar(sst), self.preprocessing_ref(ref), self.preprocessing_anchor(anchor)
         ecg_origin = down_sample(ref, target_len=None)
         ppi_info = np.pad(ecg_origin, (0, target_len - ecg_origin.shape[-1]), 'constant', constant_values=-10)
 
         ecg_target = down_sample(ref, target_len=200)[None, :]
         if self.aug_snr < 100:
-            d = add_gaussian_sst(d, self.aug_snr)
+            sst = add_gaussian_sst(sst, self.aug_snr)
         if self.aug_snr > 100 and index in self.index_select:
-            d = add_abrupt_sst(d, self.aug_snr % 100)
-        d = torch.from_numpy(d).type(torch.float32)
+            sst = add_abrupt_sst(sst, self.aug_snr % 100)
+        sst = torch.from_numpy(sst).type(torch.float32)
         ecg_target = torch.from_numpy(ecg_target).type(torch.float32)
         anchor = torch.from_numpy(anchor).type(torch.float32)
-        return d, {'ECG_shape': ecg_target, 'PPI': ppi_info, 'Anchor': anchor}
+        return sst, {'ECG_shape': ecg_target, 'PPI': ppi_info, 'Anchor': anchor}
 
 
 class MMECGDataSpliter(DataSpliter):
@@ -139,3 +143,71 @@ class MMECGDataSpliter(DataSpliter):
         return MMECGDataset(self.data_root, tr, self.sample2file_info), \
                MMECGDataset(self.data_root, vl, self.sample2file_info), \
                MMECGDataset(self.data_root, te, self.sample2file_info)
+
+
+def split_mmecg_raw_data(data_root='/root/autodl-tmp/dataset/mmecg'):
+    rcg_ecg_path = os.path.join(data_root, 'finalPartialPublicData20221108', '{sample_id}.mat')
+    ecg_fs = 200
+    sst_fs = 30
+    ecg_sample_len = 4 * ecg_fs
+    ecg_step = 2 * ecg_fs
+    sst_sample_len = 4 * sst_fs
+    sst_sample_step = 2 * sst_fs
+    uid_set = {}
+    status_set = {}
+    sample_count_set = {}
+    user_count = 0
+    status_count = 0
+    file_sample_info = {}
+    for ti in range(1, 92):
+        mat_map = load_mat_auto(rcg_ecg_path.format(sample_id=ti))
+        data_struct = mat_map['data']
+        radar_data = data_struct['RCG'][0, 0]
+        ref_data = data_struct['ECG'][0, 0]
+        user_id = data_struct['id'][0, 0][0, 0]
+        status = data_struct['physistatus'][0, 0][0]
+        if user_id not in uid_set:
+            user_count += 1
+            uid_set[user_id] = user_count
+        if status not in status_set:
+            status_count += 1
+            status_set[status] = status_count
+        sample_key = f"u{uid_set[user_id]}_st{status_set[status]}"
+        num_samples = (len(radar_data) - ecg_sample_len) // ecg_step + 1
+        sample_count = 0
+        if sample_key not in sample_count_set:
+            sample_count_set[sample_key] = 0
+            file_sample_info[sample_key] = []
+        else:
+            print(f'sample dup {sample_key}')
+            sample_count = sample_count_set[sample_key]
+        radar_trail_name = RADAR_TRAIL_FORMAT.format(user=uid_set[user_id], status=status_set[status], id=ti)
+        ref_trail_name = REF_TRAIL_FORMAT.format(user=uid_set[user_id], status=status_set[status], id=ti)
+        pos_trail_name = POS_TRAIL_FORMAT.format(user=uid_set[user_id], status=status_set[status], id=ti)
+        sst_trail_name = 'SST_{sample_id}.mat'.format(sample_id=ti)
+        anchor_trail_name = 'anchor_{sample_id}.npy'.format(sample_id=ti)
+        for i in tqdm(range(num_samples)):
+            sample_index = i + sample_count
+            ecg_s = i * ecg_step
+            ecg_t = ecg_s + ecg_sample_len
+            sst_s = i * sst_sample_step
+            sst_t = sst_s + sst_sample_len
+            file_sample_info[sample_key].append({
+                'radar_fn': radar_trail_name,
+                'pos_fn': pos_trail_name,
+                'ecg_fn': ref_trail_name,
+                'sst_fn': sst_trail_name,
+                'anchor_fn': anchor_trail_name,
+                're_s': ecg_s,
+                're_t': ecg_t,
+                'sst_s': sst_s,
+                'sst_t': sst_t
+            })
+        sample_count_set[sample_key] = sample_count + num_samples
+    np.save(os.path.join(data_root, 'samples', 'radarode_sample2file_info.npy'), file_sample_info)
+    print(f'status {status_set}')
+    print(f'user {uid_set}')
+
+
+if __name__ == '__main__':
+    split_mmecg_raw_data()
