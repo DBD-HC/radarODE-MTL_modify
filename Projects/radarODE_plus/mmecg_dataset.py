@@ -29,7 +29,6 @@ class MMECGDataset(BaseDataset):
         radar_max = np.max(radar, keepdims=True)
         radar_min = np.min(radar, keepdims=True)
         radar = (radar - radar_min) / (radar_max - radar_min + 1e-7)
-        radar = np.transpose(radar, (2, 1, 0))
         return radar
 
     @staticmethod
@@ -61,9 +60,9 @@ class MMECGDataset(BaseDataset):
 
     def __getitem__(self, index):
         sst_filename, ecg_filename, anchor_filename, es, et, ss, st = self.get_inf(index)
-        sst = load_mat_auto(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))
-        sst = sst['SST'][ss:st, :, :]
-        # d = np.load(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))[:, :, ss:st]
+        # sst = load_mat_auto(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))
+        # sst = sst['SST'][ss:st, :, :]
+        sst = np.load(os.path.join(self.sst_ecg_root, 'sst/30Hz_half_01', sst_filename))[:, :, ss:st]
         ref = np.load(os.path.join(self.sst_ecg_root, 'trails', ecg_filename))
         anchor_mask = np.load(os.path.join(self.sst_ecg_root, 'anchor', anchor_filename))
         anchor = np.zeros_like(ref)
@@ -73,10 +72,6 @@ class MMECGDataset(BaseDataset):
         ref = ref[es:et][ecg_s:ecg_t]
         target_len = 260
         sst, ref, anchor = self.preprocessing_radar(sst), self.preprocessing_ref(ref), self.preprocessing_anchor(anchor)
-        ecg_origin = down_sample(ref, target_len=None)
-        ppi_info = np.pad(ecg_origin, (0, target_len - ecg_origin.shape[-1]), 'constant', constant_values=-10)
-        d, ref, anchor = self.preprocessing_radar(d), self.preprocessing_ref(ref), self.preprocessing_anchor(anchor)
-        # self.viz.heatmap(X=d[0], win='1')
 
         ppi_info = np.pad(ref, (0, target_len - ref.shape[-1]), 'constant', constant_values=-10)
         ecg_target = down_sample(ref, target_len=200)[None, :]
@@ -204,7 +199,7 @@ def split_mmecg_raw_data(data_root='/root/autodl-tmp/dataset/mmecg'):
         radar_trail_name = RADAR_TRAIL_FORMAT.format(user=uid_set[user_id], status=status_set[status], id=ti)
         ref_trail_name = REF_TRAIL_FORMAT.format(user=uid_set[user_id], status=status_set[status], id=ti)
         pos_trail_name = POS_TRAIL_FORMAT.format(user=uid_set[user_id], status=status_set[status], id=ti)
-        sst_trail_name = 'SST_{sample_id}.mat'.format(sample_id=ti)
+        sst_trail_name = 'SST_{sample_id}.npy'.format(sample_id=ti)
         anchor_trail_name = 'anchor_{sample_id}.npy'.format(sample_id=ti)
         for i in tqdm(range(num_samples)):
             sample_index = i + sample_count
@@ -228,6 +223,17 @@ def split_mmecg_raw_data(data_root='/root/autodl-tmp/dataset/mmecg'):
     print(f'status {status_set}')
     print(f'user {uid_set}')
 
+def resave_sst(data_root='/root/autodl-tmp/dataset/mmecg/sst/30Hz_half_01'):
+    filenames = os.listdir(data_root)
+    for filename in tqdm(filenames):
+        sst = load_mat_auto(os.path.join(data_root, filename))
+        sst = sst['SST'][:, :, :]
+        sst =np.transpose(sst, (2, 1, 0))
+        new_filename = filename.split('.')[0] + '.npy'
+        np.save(os.path.join(data_root, new_filename), sst)
+        os.remove(os.path.join(data_root, filename))
+
 
 if __name__ == '__main__':
     split_mmecg_raw_data()
+    # resave_sst()
